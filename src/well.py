@@ -38,45 +38,17 @@ class Well:
             return 0.0
         
         return self.C * (P_res - P_bhp)
-
-#Небольшой тест IPR кривой
-
-fluid = Fluid(
-    M=0.01604,
-    rho_c=0.6798,
-    xa=0.008858,
-    xy=0.000668,
-    T=310
-)
-well1 = Well(
-    fluid=fluid,
-    k=50.0,      
-    h=25.0,      
-    re=500.0,    
-    rw=0.1,      
     
-)
+    def calculate_bhp(self, P_man: float, q_std: float) -> float:
+        """
+        Расчёт забойного давления через НКТ (VLP).
+        """
+        if self.pipe is None:
+            return P_man  # если нет трубы 
+        
+        node = self.pipe.dp(P_man, q_std)
+        return node.P_out
 
-P_res = 100.0                    # пластовое давление
-pbhp_values = np.linspace(100, 20, 81)   # от 100 до 20 атм
-
-q_values = []
-for pbhp in pbhp_values:
-    q = well1.q(P_res, pbhp)
-    q_values.append(q)
-
-print("IPR-кривая (примерно):")
-for i in range(0, len(pbhp_values), 10):
-    print(f"P_bhp = {pbhp_values[i]:5.1f} атм → q = {q_values[i]:6.1f} ст.м³/сут")
-    
-plt.figure(figsize=(10, 6))
-plt.plot(pbhp_values, q_values, 'b-', linewidth=2, label='IPR кривая')
-plt.xlabel('Забойное давление P_bhp, атм')
-plt.ylabel('Дебит q, ст.м³/сут')
-plt.title('Кривая притока при P_res = 100 атм')
-plt.grid(True, alpha=0.3)
-plt.legend() 
-plt.tight_layout()
-plt.show()
-
-
+    def get_C(self) -> float:
+        """Возвращает коэффициент продуктивности"""
+        return self.C
