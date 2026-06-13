@@ -1,16 +1,22 @@
-import numpy as np
-from scipy.optimize import fsolve
-import pandas as pd
-from typing import Dict, List
+import numpy as np                                   
+from scipy.optimize import fsolve                     
+import pandas as pd                                   
+from typing import Dict, List, Optional              
 
-from src.reservoir import Reservoir
-from src.well      import Well
-from src.pipe      import Pipe
+from src.reservoir  import Reservoir
+from src.well       import Well
+from src.pipe       import Pipe
 from src.compressor import DCS
-from src.state     import NodeState
+from src.state      import NodeState
 
 
 class FieldSimulator:
+    """
+    Симулятор куста: «склеивает» Reservoir, 3 объекта Well, шлейф (Pipe) и ДКС в единую систему.
+     solve(P_res): рабочая точка — решение системы 4 уравнений при заданном P_res
+     run(N_days):  динамика; на каждом шаге вызывает solve(), затем обновляет P_res
+
+    """
 
     def __init__(self, reservoir: Reservoir, wells: List[Well],
                  shlyf: Pipe, dcs: DCS):
@@ -19,14 +25,19 @@ class FieldSimulator:
         self.shlyf     = shlyf
         self.dcs       = dcs
 
-    def solve(self, P_res: float) -> Dict[str, NodeState]:
+    
+    def solve(self, P_res: float, x0: Optional[List[float]] = None) -> Dict[str, NodeState]:
+        """
+        Находит (q1, q2, q3, P_man), при котором система гидравлически уравновешена.
+
+        """
 
         def equations(x):
             q1, q2, q3, P_man = x
             q1    = max(q1, 0.0)
             q2    = max(q2, 0.0)
             q3    = max(q3, 0.0)
-            P_man = max(P_man, self.dcs.P_in() + 0.1)
+            P_man = max(P_man, self.dcs.P_in() + 0.3)
 
             qs = [q1, q2, q3]
             F  = []
@@ -40,8 +51,10 @@ class FieldSimulator:
             F.append(P_man - (self.dcs.P_in() + node_shlyf.dP))
             return F
 
-        x0  = [500.0, 500.0, 500.0, self.dcs.P_in() + 5.0]
-        sol = fsolve(equations, x0, xtol=1e-8, maxfev=2000)
+        if x0 is None:
+            x0 = [500.0, 500.0, 500.0, self.dcs.P_in() + 0.5]
+
+        sol = fsolve(equations, x0, xtol=1e-10, maxfev=5000)
 
         q1, q2, q3, P_man = sol
         q1    = max(0.0, q1)
@@ -54,32 +67,39 @@ class FieldSimulator:
             q    = [q1, q2, q3][i]
             node = well.pipe.dp(P_man, q)
             result[f"well_{i+1}"] = NodeState(
-                name=f"well_{i+1}",
-                P_in=P_man + node.dP,
-                P_out=P_man,
-                dP=node.dP,
-                q_std=q,
-                q_res=node.q_res,
-                v=node.v,
-                rho=node.rho
+                name  = f"well_{i+1}",
+                P_in  = P_man + node.dP,
+                P_out = P_man,
+                dP    = node.dP,
+                q_std = q,
+                q_res = node.q_res,
+                v     = node.v,
+                rho   = node.rho
             )
 
-        q_total         = q1 + q2 + q3 + self.dcs.q_ext
+        q_total = q1 + q2 + q3 + self.dcs.q_ext
         result["shlyf"] = self.shlyf.dp(self.dcs.P_in(), q_total)
         result["dcs"]   = NodeState(
             name="dcs",
-            P_in=self.dcs.P_in(),
-            P_out=self.dcs.P_line,
-            dP=self.dcs.P_line - self.dcs.P_in(),
-            q_std=q_total,
-            q_res=None, v=None, rho=None
+            P_in  = self.dcs.P_in(),
+            P_out = self.dcs.P_line,
+            dP    = self.dcs.P_line - self.dcs.P_in(),
+            q_std = q_total,
+            q_res = None, v = None, rho = None
         )
         return result
 
     def run(self, N_days: int, dt: float = 1.0) -> pd.DataFrame:
-        data  = []
-        P_res = self.reservoir.resprops.P
-        Gp    = 0.0
+        """
+        Прогон симуляции по времени. На каждом шаге:
+        1) solve(P_res, x0=решение_предыдущего_дня) — рабочая точка;
+        2) суммируем добычу за день;
+        3) обновляем P_res через материальный баланс reservoir.p2().
+        """
+        data    = []
+        P_res   = self.reservoir.resprops.P
+        Gp      = 0.0
+        last_x  = None                                 
 
         print(f"Запуск симуляции на {N_days} суток...")
 
@@ -87,12 +107,15 @@ class FieldSimulator:
             if day % 30 == 0:
                 print(f"День {day:4d} | P_res = {P_res:.2f} атм")
 
-            states  = self.solve(P_res)
+            states = self.solve(P_res, x0=last_x)
+
             q1      = states["well_1"].q_std
             q2      = states["well_2"].q_std
             q3      = states["well_3"].q_std
             q_total = q1 + q2 + q3
             P_man   = states["well_1"].P_out
+
+            last_x = [q1, q2, q3, P_man]
 
             Gp += q_total * dt
             data.append({
@@ -111,4 +134,4 @@ class FieldSimulator:
 
         print(f"День {N_days:4d} | P_res = {P_res:.2f} атм")
         print("Симуляция завершена.\n")
-        return pd.DataFrame(data)       
+        return pd.DataFrame(data)

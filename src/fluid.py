@@ -3,7 +3,7 @@
 import math
 import pandas as pd
 from pathlib import Path
-from interpolator import LinearInterpolator
+from src.interpolator import LinearInterpolator
 
 
 class Fluid:
@@ -22,8 +22,8 @@ class Fluid:
         """
         self.M     = M
         self.rho_c = rho_c
-        self.xa    = xa
-        self.xy    = xy
+        self.xa    = xa/100
+        self.xy    = xy/100
         self.T     = T
 
         csv_path = Path(__file__).parent.parent / "interp_data.csv"

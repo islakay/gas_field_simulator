@@ -22,7 +22,7 @@ class DCS:
         
         return self.P_line / self.CR
     
-    def set_comprasiion_ratio(self, new_CR: float):
+    def set_compression_ratio(self, new_CR: float):
         """
         Для анализа чувствительности
         """
